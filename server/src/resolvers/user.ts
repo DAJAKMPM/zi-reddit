@@ -5,18 +5,19 @@ import { EntityManager } from "@mikro-orm/postgresql";
 import { AuthenticationInput, UserResponse } from "../types/user";
 import { Context } from "../types/context";
 import { User } from "../entities/User";
+import { COOKIE_NAME } from "../constants";
 
 @Resolver()
 export class UserResolver {
-  @Query(() => UserResponse, { nullable: true })
-  async currentUser(@Ctx() { req, em }: Context) {
+  @Query(() => User, { nullable: true })
+  async currentUser(@Ctx() { req, em }: Context): Promise<User | null> {
     if (!req.session.userId) {
       return null;
     }
 
     const user = await em.findOne(User, { id: req.session.userId });
 
-    return { user };
+    return user;
   }
 
   @Mutation(() => UserResponse)
@@ -110,7 +111,7 @@ export class UserResolver {
   logout(@Ctx() { req, res }: Context) {
     return new Promise((resolve) =>
       req.session.destroy((err) => {
-        res.clearCookie("qid");
+        res.clearCookie(COOKIE_NAME);
         if (err) {
           console.log(err);
           resolve(false);

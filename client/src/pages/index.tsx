@@ -1,7 +1,12 @@
-import React from "react";
+import React, { Fragment, FC } from "react";
+import { Navbar } from "../components/Navbar";
 
-const Index = () => {
-  return <div>hello</div>;
+const Index: FC = () => {
+  return (
+    <Fragment>
+      <Navbar />
+    </Fragment>
+  );
 };
 
 export default Index;
