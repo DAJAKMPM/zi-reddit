@@ -1,30 +1,89 @@
 import argon2 from "argon2";
-import { Resolver, Mutation, Arg, Ctx } from "type-graphql";
+import { Resolver, Mutation, Arg, Ctx, Query } from "type-graphql";
+import { EntityManager } from "@mikro-orm/postgresql";
+
 import { AuthenticationInput, UserResponse } from "../types/user";
 import { Context } from "../types/context";
 import { User } from "../entities/User";
 
 @Resolver()
 export class UserResolver {
-  @Mutation(() => User)
+  @Query(() => UserResponse, { nullable: true })
+  async currentUser(@Ctx() { req, em }: Context) {
+    if (!req.session.userId) {
+      return null;
+    }
+
+    const user = await em.findOne(User, { id: req.session.userId });
+
+    return { user };
+  }
+
+  @Mutation(() => UserResponse)
   async register(
     @Arg("formData") formData: AuthenticationInput,
-    @Ctx() { em }: Context
-  ): Promise<User> {
-    const hashedPasswod = await argon2.hash(formData.password);
-    const user = em.create(User, {
-      username: formData.username,
-      password: hashedPasswod,
-    });
+    @Ctx() { req, em }: Context
+  ): Promise<UserResponse> {
+    if (formData.username.length <= 2) {
+      return {
+        errors: [
+          {
+            field: "username",
+            message: "length must be greater than 2",
+          },
+        ],
+      };
+    }
 
-    await em.persistAndFlush(user);
-    return user;
+    if (formData.password.length <= 2) {
+      return {
+        errors: [
+          {
+            field: "password",
+            message: "length must be greater than 2",
+          },
+        ],
+      };
+    }
+    const hashedPasswod = await argon2.hash(formData.password);
+
+    let user;
+
+    try {
+      const result = await (em as EntityManager)
+        .createQueryBuilder(User)
+        .getKnexQuery()
+        .insert({
+          username: formData.username,
+          password: hashedPasswod,
+          created_at: new Date(),
+          updated_at: new Date(),
+        })
+        .returning("*");
+
+      user = result[0];
+    } catch (error) {
+      if (error.code === "23505") {
+        return {
+          errors: [
+            {
+              field: "username",
+              message: "Username is already taken",
+            },
+          ],
+        };
+      }
+    }
+
+    req.session.userId = user.id;
+
+    return { user };
   }
 
   @Mutation(() => UserResponse)
   async login(
     @Arg("formData") formData: AuthenticationInput,
-    @Ctx() { em }: Context
+    @Ctx() { em, req }: Context
   ): Promise<UserResponse> {
     const user = await em.findOne(User, { username: formData.username });
 
@@ -42,6 +101,24 @@ export class UserResolver {
       };
     }
 
+    req.session.userId = user.id;
+
     return { user };
+  }
+
+  @Mutation(() => Boolean)
+  logout(@Ctx() { req, res }: Context) {
+    return new Promise((resolve) =>
+      req.session.destroy((err) => {
+        res.clearCookie("qid");
+        if (err) {
+          console.log(err);
+          resolve(false);
+          return;
+        }
+
+        resolve(true);
+      })
+    );
   }
 }
